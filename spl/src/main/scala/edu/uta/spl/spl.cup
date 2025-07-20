@@ -1,0 +1,251 @@
+/********************************************************************************
+*
+* File: spl.cup
+* The SPL parser
+* Note for Assignment 3- This file uses assignment2_base_grammar.cup as provided.
+*
+********************************************************************************/
+
+package edu.uta.spl;
+
+import scala.collection.immutable.*;
+import scala.Tuple2;
+import java_cup.runtime.*;
+
+
+parser code {:
+
+    static int[] tokens = {
+      sym.error, sym.ID, sym.STRING_LITERAL, sym.INTEGER_LITERAL, sym.FLOAT_LITERAL,
+      sym.AND, sym.ARRAY, sym.BOOLEAN, sym.BY, sym.DEF, sym.DIV, sym.ELSE, sym.EQUAL, sym.EXIT, sym.FALSE,
+      sym.FLOAT, sym.FOR, sym.IF, sym.INT, sym.LOOP, sym.MOD,
+      sym.NOT, sym.OR, sym.PRINT, sym.READ, sym.RETURN, sym.STRING, sym.TO, sym.TYPE, sym.VAR, sym.WHILE,
+      sym.PLUS, sym.MINUS, sym.TIMES, sym.TRUE,
+      sym.LT, sym.LEQ, sym.GT, sym.GEQ, sym.EQ, sym.NEQ, sym.COLON, sym.SEMI,
+      sym.COMMA, sym.SHARP, sym.DOT, sym.LP, sym.RP, sym.LB, sym.RB, sym.LSB, sym.RSB
+    };
+
+    static String[] token_names = {
+      "error", "ID", "STRING_LITERAL", "INTEGER_LITERAL", "FLOAT_LITERAL",
+      "AND &&", "ARRAY", "BOOLEAN", "BY", "DEF", "DIV /", "ELSE", "EQUAL", "EXIT", "FALSE",
+      "FLOAT", "FOR", "IF", "INT", "LOOP", "MOD %",
+      "NOT", "OR ||", "PRINT", "READ", "RETURN", "STRING", "TO", "TYPE", "VAR", "WHILE",
+      "PLUS +", "MINUS -", "TIMES *", "TRUE",
+      "LT <", "LEQ <=", "GT >", "GEQ >=", "EQ ==", "NEQ <>", "COLON :", "SEMI ;",
+      "COMMA ,", "SHARP #", "DOT .", "LP (", "RP )", "LB "+'{', "RB "+'}', "LSB [", "RSB ]"
+    };
+
+    public static String print ( Symbol s ) {
+        for ( int i = 0; i < tokens.length; i++ ) {
+            if (tokens[i] == s.sym) {
+                String res = token_names[i] + " ";
+                if (s.value == null)
+                    return res;
+                else if (s.value instanceof Integer)
+                    return res + ((Integer) s.value).intValue();
+                else if (s.value instanceof Float)
+                    return res + ((Float) s.value).floatValue();
+                else if (s.value instanceof String)
+                    return res + "\"" + (String) s.value + "\"";
+            }
+        };
+        return "?";
+    }
+
+    public void syntax_error ( Symbol token ) {
+        System.err.println("*** Syntax Error: " + print(token) + " (line: " + token.left
+                           + ", column: " + token.right + ")");
+        System.exit(1);
+    }
+
+    /** nil is the empty list */
+    final static List nil = Nil$.MODULE$;
+
+    /** Append list2 at the end of list1 (ie, return a new list containing
+        the elements from list1 followed by the elements from list2) */
+    static<T> List<T> append ( List<T> list1, List<T> list2 ) {
+        return list1.$colon$colon$colon(list2);
+    }
+
+    /** append the element elem at the end of the list
+       (ie, return a new list containing the list followed by the elem) */
+    static<T> List<T> append ( List<T> list, T elem ) {
+        return nil.$colon$colon(elem).$colon$colon$colon(list);
+    }
+
+    /** Insert the element elem at the beginning of the list
+        (ie, return a new list containing the elem followed by the list) */
+    static<T> List<T> add ( T elem, List<T> list ) {
+        return list.$colon$colon(elem);
+    }
+
+:};
+
+/* Terminals (tokens returned by the scanner). */
+terminal String  ID, STRING_LITERAL;
+terminal Integer INTEGER_LITERAL;
+terminal Float   FLOAT_LITERAL;
+terminal         AND, ARRAY, BOOLEAN, BY, DEF, DIV, ELSE, EQUAL, EXIT, FALSE,
+                 FLOAT, FOR, IF, INT, LOOP, MOD,
+                 NOT, OR, PRINT, READ, RETURN, STRING, TO, TYPE, VAR, WHILE,
+                 PLUS, MINUS, TIMES, TRUE, LT, LEQ, GT, GEQ, EQ, NEQ, COLON, SEMI,
+                 COMMA, SHARP, DOT, LP, RP, LB, RB, LSB, RSB, UMINUS;
+
+/* SPL manual grammar translation to cup approach
+ * - Anything between {} means 0 or more times -> create a non terminal to handle the recursive property
+ * - Anything between [] means it is optional (1 or 0) -> duplicate the rule, one with and one without
+ *   Note: You can also create another nonterminal to handle [ ] like so:
+ *
+ *   nonterminal_thing ::= stuff that is in-between [ ]
+ *                     |   // empty
+ *                     ;
+ */
+
+non terminal Program                         program;
+non terminal BlockSt                         block_content;
+non terminal List<Definition>                defs;            // def ';' { def ';' }
+non terminal Definition                      def;
+non terminal Stmt                            stmt;
+non terminal List<Stmt>                      stmts;           // stmt ';' { stmt ';' }
+non terminal Expr                            expr;
+non terminal Type                            type;
+non terminal Lvalue                          lvalue;
+non terminal List<Bind<Type>>                type_binds;      // ID ':' type { ',' ID ':' type }
+non terminal List<Type>                      type_list;       // type { ',' type }
+non terminal List<Lvalue>                    lvalue_list;     // lvalue { ',' lvalue }
+non terminal List<Expr>                      expr_list;       // expr { ',' expr }
+non terminal List<Bind<Expr>>                assign_list;     // ID '=' expr { ',' ID '=' expr }
+
+/* Read Section 7 Expressions in the spl manual, last paragraph and Hints for Assignment 2 */
+precedence nonassoc ELSE; // Required to handle the dangling-ELSE problem
+precedence left     OR;
+precedence left     AND;
+precedence right    NOT;
+precedence nonassoc EQ, LT, GT, LEQ, GEQ, NEQ;
+precedence left     PLUS, MINUS;
+precedence left     TIMES, DIV, MOD;
+precedence right    UMINUS;
+precedence left     LP, LSB;
+
+// UMINUS is not an actual token provided by the scanner, rather is it used in a different way
+// see here under section 2.5.3 Contextual precedence here: https://www2.cs.tum.edu/projects/cup/docs.php#production_list
+
+start with program;
+
+program         ::= block_content:b                     {: SPL.setAST(new Program(b)); :}
+                ;
+
+/* The top rule is for 1 or more defs, the bottom rule is for only statements (0 defs) */
+block_content   ::= defs:dl stmts:sl                    {: RESULT = new BlockSt(dl,sl);  :}
+                |   stmts:sl                            {: RESULT = new BlockSt(nil,sl); :}
+                ;
+
+/* Definitions */
+def             ::= VAR ID:id EQUAL expr:e              {: RESULT = new VarDef(id, new AnyType(), e); :}
+                |   VAR ID:id COLON type:t EQUAL expr:e {: RESULT = new VarDef(id, t, e); :}
+                |   TYPE ID:id EQUAL type:t             {: RESULT = new TypeDef(id, t); :}
+                |   DEF ID:id LP RP LB block_content:b RB
+                                                        {: RESULT = new FuncDef(id, nil, new NoType(), b); :}
+                |   DEF ID:id LP RP COLON type:t LB block_content:b RB
+                                                        {: RESULT = new FuncDef(id, nil, t, b); :}
+                |   DEF ID:id LP type_binds:params RP LB block_content:b RB
+                                                        {: RESULT = new FuncDef(id, params, new NoType(), b); :}
+                |   DEF ID:id LP type_binds:params RP COLON type:t LB block_content:b RB
+                                                        {: RESULT = new FuncDef(id, params, t, b); :}
+                ;
+defs            ::= def:d SEMI                          {: RESULT = append(nil, d); :}
+                |   defs:dl def:d SEMI                  {: RESULT = append(dl, d); :}
+                ;
+
+/* Types */
+type            ::= INT                                 {: RESULT = new IntType(); :}
+                |   FLOAT                               {: RESULT = new FloatType(); :}
+                |   STRING                              {: RESULT = new StringType(); :}
+                |   BOOLEAN                             {: RESULT = new BooleanType(); :}
+                |   ID:id                               {: RESULT = new NamedType(id); :}
+                |   ARRAY LSB type:t RSB                {: RESULT = new ArrayType(t); :}
+                |   LB type_binds:tb RB                 {: RESULT = new RecordType(tb); :}
+                |   LP RP                               {: RESULT = new TupleType(nil); :}
+                |   LP type_list:tl RP                  {: RESULT = new TupleType(tl); :}
+                ;
+type_binds      ::= ID:id COLON type:t                  {: RESULT = append(nil, new Bind<Type>(id, t)); :}
+                |   type_binds:tb COMMA ID:id COLON type:t
+                                                        {: RESULT = append(tb, new Bind<Type>(id, t)); :}
+                ;
+type_list       ::= type:t                              {: RESULT = append(nil, t); :}
+                |   type_list:tl COMMA type:t           {: RESULT = append(tl, t); :}
+                ;
+
+/* Lvalues */
+lvalue          ::= ID:id                               {: RESULT = new Var(id); :}
+                |   lvalue:lv LSB expr:e RSB            {: RESULT = new ArrayDeref(new LvalExp(lv), e); :}
+                |   lvalue:lv DOT ID:id                 {: RESULT = new RecordDeref(new LvalExp(lv), id); :}
+                |   lvalue:lv SHARP INTEGER_LITERAL:n   {: RESULT = new TupleDeref(new LvalExp(lv), n); :}
+                ;
+lvalue_list     ::= lvalue:lv                           {: RESULT = append(nil, lv); :}
+                |   lvalue_list:ll COMMA lvalue:lv      {: RESULT = append(ll, lv); :}
+                ;
+
+/* Expressions */
+
+expr            ::= INTEGER_LITERAL:n                   {: RESULT = new IntConst(n); :}
+                |   FLOAT_LITERAL:f                     {: RESULT = new FloatConst(f); :}
+                |   STRING_LITERAL:s                    {: RESULT = new StringConst(s); :}
+                |   TRUE                                {: RESULT = new BooleanConst(true); :}
+                |   FALSE                               {: RESULT = new BooleanConst(false); :}
+                |   lvalue:lv                           {: RESULT = new LvalExp(lv); :}
+                |   MINUS expr:e                        {: RESULT = new UnOpExp("minus", e); :}  %prec UMINUS
+                |   NOT expr:e                          {: RESULT = new UnOpExp("not", e); :}
+                |   expr:e1 PLUS expr:e2                {: RESULT = new BinOpExp("plus", e1, e2); :}
+                |   expr:e1 MINUS expr:e2               {: RESULT = new BinOpExp("minus", e1, e2); :}
+                |   expr:e1 TIMES expr:e2               {: RESULT = new BinOpExp("times", e1, e2); :}
+                |   expr:e1 DIV expr:e2                 {: RESULT = new BinOpExp("div", e1, e2); :}
+                |   expr:e1 MOD expr:e2                 {: RESULT = new BinOpExp("mod", e1, e2); :}
+                |   expr:e1 AND expr:e2                 {: RESULT = new BinOpExp("and", e1, e2); :}
+                |   expr:e1 OR expr:e2                  {: RESULT = new BinOpExp("or", e1, e2); :}
+                |   expr:e1 EQ expr:e2                  {: RESULT = new BinOpExp("eq", e1, e2); :}
+                |   expr:e1 NEQ expr:e2                 {: RESULT = new BinOpExp("neq", e1, e2); :}
+                |   expr:e1 LT expr:e2                  {: RESULT = new BinOpExp("lt", e1, e2); :}
+                |   expr:e1 LEQ expr:e2                 {: RESULT = new BinOpExp("leq", e1, e2); :}
+                |   expr:e1 GT expr:e2                  {: RESULT = new BinOpExp("gt", e1, e2); :}
+                |   expr:e1 GEQ expr:e2                 {: RESULT = new BinOpExp("geq", e1, e2); :}
+                |   ARRAY LP expr:e1 COMMA expr:e2 RP   {: RESULT = new ArrayGen(e1, e2); :}
+                |   ID:id LP RP                         {: RESULT = new CallExp(id, nil); :}
+                |   ID:id LP expr_list:el RP            {: RESULT = new CallExp(id, el); :}
+                |   LB assign_list:al RB                {: RESULT = new RecordExp(al); :}
+                |   LP RP                               {: RESULT = new NullExp(); :}
+                |   LP expr_list:el RP                  {: RESULT = new TupleExp(el); :}
+                |   LSB expr_list:el RSB                {: RESULT = new ArrayExp(el); :}
+                ;
+expr_list       ::= expr:e                              {: RESULT = append(nil, e); :}
+                |   expr_list:el COMMA expr:e           {: RESULT = append(el, e); :}
+                ;
+assign_list     ::= ID:id EQUAL expr:e                  {: RESULT = append(nil, new Bind<Expr>(id, e)); :}
+                |   assign_list:al COMMA ID:id EQUAL expr:e
+                                                        {: RESULT = append(al, new Bind<Expr>(id, e)); :}
+                ;
+
+/* Statements */
+stmt            ::= lvalue:lv EQUAL expr:e              {: RESULT = new AssignSt(lv, e); :}
+                |   ID:id LP RP                         {: RESULT = new CallSt(id, nil); :}
+                |   ID:id LP expr_list:el RP            {: RESULT = new CallSt(id, el); :}
+                |   LB block_content:bc RB              {: RESULT = bc; :}
+                |   READ LP lvalue_list:ll RP           {: RESULT = new ReadSt(ll); :}
+                |   PRINT LP RP                         {: RESULT = new PrintSt(nil); :}
+                |   PRINT LP expr_list:el RP            {: RESULT = new PrintSt(el); :}
+                |   IF LP expr:e RP stmt:s              {: RESULT = new IfSt(e, s, null); :}
+                |   IF LP expr:e RP stmt:s1 ELSE stmt:s2
+                                                        {: RESULT = new IfSt(e, s1, s2); :}
+                |   FOR LP ID:id EQUAL expr:e1 TO expr:e2 RP stmt:s
+                                                        {: RESULT = new ForSt(id, e1, e2, new IntConst(1), s); :}
+                |   FOR LP ID:id EQUAL expr:e1 TO expr:e2 BY expr:e3 RP stmt:s
+                                                        {: RESULT = new ForSt(id, e1, e2, e3, s); :}
+                |   WHILE LP expr:e RP stmt:s           {: RESULT = new WhileSt(e, s); :}
+                |   LOOP stmt:s                         {: RESULT = new LoopSt(s); :}
+                |   EXIT                                {: RESULT = new ExitSt(); :}
+                |   RETURN                              {: RESULT = new ReturnSt(); :}
+                |   RETURN expr:e                       {: RESULT = new ReturnValueSt(e); :}
+                ;
+stmts           ::= stmt:s SEMI                         {: RESULT = append(nil, s); :}
+                |   stmts:sl stmt:s SEMI                {: RESULT = append(sl, s); :}
+                ;
